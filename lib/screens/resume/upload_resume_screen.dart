@@ -176,6 +176,13 @@ class _UploadResumeScreenState extends State<UploadResumeScreen> {
 
       final ResumeAnalysisModel result = await _geminiService.analyzeResume(
         extractedText,
+        onStatusUpdate: (status) {
+          if (mounted) {
+            setState(() {
+              currentStatusMessage = status;
+            });
+          }
+        },
       );
 
       if (!mounted) return;

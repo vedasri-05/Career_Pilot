@@ -10,8 +10,32 @@
 class GeminiConfig {
   GeminiConfig._();
 
+  /// Default model configured for AI resume analysis.
+  static const String _defaultModel = 'gemini-3.8-flash';
+
+  /// Optional build-time environment variable:
+  /// `--dart-define=GEMINI_MODEL=gemini-3.6-flash`
+  static const String _envModel = String.fromEnvironment('GEMINI_MODEL');
+
+  /// Runtime model override used by automated tests or dynamic fallback.
+  static String _runtimeModel = '';
+
   /// The model configured for AI resume analysis.
-  static const String modelName = 'gemini-3.8-flash';
+  static String get modelName {
+    if (_runtimeModel.isNotEmpty) return _runtimeModel;
+    if (_envModel.isNotEmpty) return _envModel;
+    return _defaultModel;
+  }
+
+  /// Sets a runtime model override.
+  static void setRuntimeModel(String model) {
+    _runtimeModel = model.trim();
+  }
+
+  /// Clears any runtime model override.
+  static void clearRuntimeModel() {
+    _runtimeModel = '';
+  }
 
   /// Build-time environment variable injected via:
   /// `--dart-define=GEMINI_API_KEY=your_key`
