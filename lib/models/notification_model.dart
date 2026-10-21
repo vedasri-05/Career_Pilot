@@ -3,6 +3,7 @@ enum NotificationType {
   roadmapMilestone,
   jobAlert,
   interviewScorecard,
+  careerReminder,
   general;
 
   String toValue() {
@@ -15,6 +16,8 @@ enum NotificationType {
         return 'jobAlert';
       case NotificationType.interviewScorecard:
         return 'interviewScorecard';
+      case NotificationType.careerReminder:
+        return 'careerReminder';
       case NotificationType.general:
         return 'general';
     }
@@ -30,6 +33,8 @@ enum NotificationType {
         return NotificationType.jobAlert;
       case 'interviewScorecard':
         return NotificationType.interviewScorecard;
+      case 'careerReminder':
+        return NotificationType.careerReminder;
       case 'general':
       default:
         return NotificationType.general;
@@ -109,6 +114,8 @@ class NotificationPreferences {
   final bool stageMilestonesEnabled;
   final bool jobAlertsEnabled;
   final bool interviewScorecardsEnabled;
+  final bool periodicReminderEnabled;
+  final int periodicReminderIntervalMinutes;
 
   const NotificationPreferences({
     this.dailyRoadmapReminderEnabled = true,
@@ -118,6 +125,8 @@ class NotificationPreferences {
     this.stageMilestonesEnabled = true,
     this.jobAlertsEnabled = true,
     this.interviewScorecardsEnabled = true,
+    this.periodicReminderEnabled = true,
+    this.periodicReminderIntervalMinutes = 2,
   });
 
   Map<String, dynamic> toMap() {
@@ -129,6 +138,8 @@ class NotificationPreferences {
       'stageMilestonesEnabled': stageMilestonesEnabled,
       'jobAlertsEnabled': jobAlertsEnabled,
       'interviewScorecardsEnabled': interviewScorecardsEnabled,
+      'periodicReminderEnabled': periodicReminderEnabled,
+      'periodicReminderIntervalMinutes': periodicReminderIntervalMinutes,
     };
   }
 
@@ -143,6 +154,9 @@ class NotificationPreferences {
       stageMilestonesEnabled: map['stageMilestonesEnabled'] ?? true,
       jobAlertsEnabled: map['jobAlertsEnabled'] ?? true,
       interviewScorecardsEnabled: map['interviewScorecardsEnabled'] ?? true,
+      periodicReminderEnabled: map['periodicReminderEnabled'] ?? true,
+      periodicReminderIntervalMinutes:
+          (map['periodicReminderIntervalMinutes'] as num?)?.toInt() ?? 2,
     );
   }
 
@@ -154,6 +168,8 @@ class NotificationPreferences {
     bool? stageMilestonesEnabled,
     bool? jobAlertsEnabled,
     bool? interviewScorecardsEnabled,
+    bool? periodicReminderEnabled,
+    int? periodicReminderIntervalMinutes,
   }) {
     return NotificationPreferences(
       dailyRoadmapReminderEnabled:
@@ -166,6 +182,11 @@ class NotificationPreferences {
       jobAlertsEnabled: jobAlertsEnabled ?? this.jobAlertsEnabled,
       interviewScorecardsEnabled:
           interviewScorecardsEnabled ?? this.interviewScorecardsEnabled,
+      periodicReminderEnabled:
+          periodicReminderEnabled ?? this.periodicReminderEnabled,
+      periodicReminderIntervalMinutes:
+          periodicReminderIntervalMinutes ??
+          this.periodicReminderIntervalMinutes,
     );
   }
 }

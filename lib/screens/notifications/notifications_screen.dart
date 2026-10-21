@@ -34,6 +34,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return AppTheme.violet;
       case NotificationType.interviewScorecard:
         return AppTheme.amber;
+      case NotificationType.careerReminder:
+        return AppTheme.teal;
       case NotificationType.general:
         return AppTheme.primaryBlue;
     }
@@ -49,6 +51,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Icons.alt_route_rounded;
       case NotificationType.interviewScorecard:
         return Icons.record_voice_over_rounded;
+      case NotificationType.careerReminder:
+        return Icons.schedule_rounded;
       case NotificationType.general:
         return Icons.notifications_none_rounded;
     }
@@ -109,6 +113,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           context,
           MaterialPageRoute(builder: (context) => const InterviewHubScreen()),
         );
+        break;
+
+      case NotificationType.careerReminder:
+        final cached = RoadmapService.currentRoadmap;
+        if (cached != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RoadmapScreen(roadmap: cached),
+            ),
+          );
+        }
         break;
 
       case NotificationType.general:
@@ -495,6 +511,16 @@ class _NotificationPreferencesSheetState
         targetRole: profile?.careerGoal ?? 'Career Path',
       );
 
+      // Reschedule or cancel recurring career reminders
+      if (_prefs.periodicReminderEnabled) {
+        await _notificationService.schedulePeriodicCareerReminders(
+          intervalMinutes: _prefs.periodicReminderIntervalMinutes,
+          forceReschedule: true,
+        );
+      } else {
+        await _notificationService.cancelPeriodicCareerReminders();
+      }
+
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -650,6 +676,26 @@ class _NotificationPreferencesSheetState
             ),
             const SizedBox(height: 12),
           ],
+
+          // 2-Minute Career Reminders Toggle
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              '2-Minute Career Reminders',
+              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Receive rotating career tips & check-ins every 2 minutes',
+              style: TextStyle(fontSize: 12),
+            ),
+            value: _prefs.periodicReminderEnabled,
+            activeThumbColor: AppTheme.primaryBlue,
+            onChanged: (val) {
+              setState(() {
+                _prefs = _prefs.copyWith(periodicReminderEnabled: val);
+              });
+            },
+          ),
 
           const Divider(),
 

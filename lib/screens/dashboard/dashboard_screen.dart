@@ -35,6 +35,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final user = currentUser;
     if (user != null) {
       await NotificationService().initialize();
+      await NotificationService().syncPeriodicRemindersWithPreferences(
+        user.uid,
+      );
       final profile = await FirestoreService().getUserProfile(user.uid);
       if (profile != null && profile.careerGoal.isNotEmpty) {
         await NotificationService().checkAndNotifyNewJobs(

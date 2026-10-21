@@ -11,10 +11,12 @@ class GeminiConfig {
   GeminiConfig._();
 
   /// Default model configured for AI resume analysis.
-  static const String _defaultModel = 'gemini-3.8-flash';
+  /// Uses gemini-2.0-flash as the primary General Availability model
+  /// with 15 RPM / 1,500 RPD free tier quotas on Google AI Studio.
+  static const String _defaultModel = 'gemini-2.0-flash';
 
   /// Optional build-time environment variable:
-  /// `--dart-define=GEMINI_MODEL=gemini-3.6-flash`
+  /// `--dart-define=GEMINI_MODEL=gemini-1.5-flash`
   static const String _envModel = String.fromEnvironment('GEMINI_MODEL');
 
   /// Runtime model override used by automated tests or dynamic fallback.
@@ -26,6 +28,13 @@ class GeminiConfig {
     if (_envModel.isNotEmpty) return _envModel;
     return _defaultModel;
   }
+
+  /// Supported Flash models available on Google AI Studio.
+  static const List<String> supportedFlashModels = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.5-flash',
+  ];
 
   /// Sets a runtime model override.
   static void setRuntimeModel(String model) {

@@ -73,7 +73,7 @@ void main() {
     });
 
     test('preserves the configured Gemini model name', () {
-      expect(GeminiConfig.modelName, 'gemini-3.8-flash');
+      expect(GeminiConfig.modelName, 'gemini-2.0-flash');
     });
 
     test(

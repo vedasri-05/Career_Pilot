@@ -16,8 +16,15 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  final FirestoreService _firestoreService = FirestoreService();
+  FirestoreService? _customFirestoreService;
+  FirestoreService get _firestoreService =>
+      _customFirestoreService ??= FirestoreService();
   final ApiService _apiService = ApiService();
+
+  @visibleForTesting
+  set firestoreServiceForTesting(FirestoreService service) {
+    _customFirestoreService = service;
+  }
 
   bool _isInitialized = false;
 
@@ -30,6 +37,24 @@ class NotificationService {
   static const int milestoneNotificationId = 102;
   static const int jobAlertNotificationId = 103;
   static const int interviewNotificationId = 104;
+  static const int periodicReminderBaseId = 200;
+  static const int periodicReminderQueueSize = 20;
+
+  static const List<String> careerReminderMessages = [
+    'Time to work on your career roadmap!',
+    'Spend a few minutes improving your skills today.',
+    'Have you checked the latest job opportunities?',
+    'Keep going! Small steps lead to career success.',
+    'Ready to practise a mock interview?',
+    "Don't forget to update your roadmap progress.",
+  ];
+
+  Timer? _inAppPeriodicTimer;
+  int _currentMessageIndex = 0;
+  bool _isPeriodicScheduled = false;
+
+  bool get isPeriodicReminderActive => _isPeriodicScheduled;
+  int get currentMessageIndex => _currentMessageIndex;
 
   /// Initializes timezone data and local notification channel settings.
   Future<void> initialize() async {
@@ -73,13 +98,18 @@ class NotificationService {
       playSound: true,
     );
 
-    final androidImplementation = _localNotifications
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
+    // Create high-importance Android channel if supported
+    try {
+      final androidImplementation = _localNotifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
 
-    if (androidImplementation != null) {
-      await androidImplementation.createNotificationChannel(androidChannel);
+      if (androidImplementation != null) {
+        await androidImplementation.createNotificationChannel(androidChannel);
+      }
+    } catch (e) {
+      debugPrint('Android channel setup skipped on host: $e');
     }
 
     _isInitialized = true;
@@ -87,16 +117,18 @@ class NotificationService {
 
   /// Requests notification permissions on Android 13+ and iOS.
   Future<bool> requestPermissions() async {
-    final androidImplementation = _localNotifications
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
+    try {
+      final androidImplementation = _localNotifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
 
-    if (androidImplementation != null) {
-      final granted = await androidImplementation
-          .requestNotificationsPermission();
-      return granted ?? false;
-    }
+      if (androidImplementation != null) {
+        final granted = await androidImplementation
+            .requestNotificationsPermission();
+        return granted ?? false;
+      }
+    } catch (_) {}
 
     final iOSImplementation = _localNotifications
         .resolvePlatformSpecificImplementation<
@@ -357,5 +389,161 @@ class NotificationService {
         payload: 'interview_${session.id}',
       );
     } catch (_) {}
+  }
+
+  // =========================================================================
+  // 5. RECURRING CAREER REMINDERS (EVERY 2 MINUTES)
+  // =========================================================================
+
+  /// Schedules recurring career reminders (default: every 2 minutes) with rotating messages.
+  /// Uses a rolling window of exact zoned schedules for background delivery
+  /// combined with an in-app timer for foreground precision.
+  Future<bool> schedulePeriodicCareerReminders({
+    int intervalMinutes = 2,
+    bool forceReschedule = false,
+  }) async {
+    await initialize();
+
+    // Avoid redundant rescheduling if already running with same settings
+    if (_isPeriodicScheduled && !forceReschedule) {
+      return true;
+    }
+
+    // Cancel existing schedules first
+    await cancelPeriodicCareerReminders();
+
+    final hasPermission = await requestPermissions();
+    if (!hasPermission) {
+      debugPrint(
+        'Notification permissions not granted for periodic reminders.',
+      );
+      return false;
+    }
+
+    final safeInterval = intervalMinutes > 0 ? intervalMinutes : 2;
+    final now = tz.TZDateTime.now(tz.local);
+
+    const androidDetails = AndroidNotificationDetails(
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+    );
+    const notificationDetails = NotificationDetails(android: androidDetails);
+
+    // Schedule rolling buffer of future alarms (e.g. 20 consecutive intervals = 60 minutes)
+    for (int i = 0; i < periodicReminderQueueSize; i++) {
+      final scheduledTime = now.add(Duration(minutes: (i + 1) * safeInterval));
+      final messageIndex = i % careerReminderMessages.length;
+      final message = careerReminderMessages[messageIndex];
+      final notificationId = periodicReminderBaseId + i;
+
+      try {
+        await _localNotifications.zonedSchedule(
+          id: notificationId,
+          title: 'CareerPilot Reminder',
+          body: message,
+          scheduledDate: scheduledTime,
+          notificationDetails: notificationDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          payload: 'career_reminder_$messageIndex',
+        );
+      } catch (_) {
+        // Fallback to inexact if exact alarm permission is restricted by OS
+        try {
+          await _localNotifications.zonedSchedule(
+            id: notificationId,
+            title: 'CareerPilot Reminder',
+            body: message,
+            scheduledDate: scheduledTime,
+            notificationDetails: notificationDetails,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+            payload: 'career_reminder_$messageIndex',
+          );
+        } catch (e2) {
+          debugPrint('Failed to schedule periodic reminder #$i: $e2');
+        }
+      }
+    }
+
+    // Active in-app timer for real-time firing while app is open
+    _inAppPeriodicTimer?.cancel();
+    _inAppPeriodicTimer = Timer.periodic(Duration(minutes: safeInterval), (
+      timer,
+    ) {
+      triggerSingleCareerReminder();
+    });
+
+    _isPeriodicScheduled = true;
+    return true;
+  }
+
+  /// Manually or foreground-triggered career reminder with message rotation.
+  Future<void> triggerSingleCareerReminder({String? customMessage}) async {
+    await initialize();
+
+    final message =
+        customMessage ??
+        careerReminderMessages[_currentMessageIndex %
+            careerReminderMessages.length];
+    _currentMessageIndex =
+        (_currentMessageIndex + 1) % careerReminderMessages.length;
+
+    const androidDetails = AndroidNotificationDetails(
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@mipmap/ic_launcher',
+    );
+    const notificationDetails = NotificationDetails(android: androidDetails);
+
+    try {
+      await _localNotifications.show(
+        id: periodicReminderBaseId,
+        title: 'CareerPilot Reminder',
+        body: message,
+        notificationDetails: notificationDetails,
+        payload: 'career_reminder',
+      );
+    } catch (e) {
+      debugPrint('Error triggering single career reminder: $e');
+    }
+  }
+
+  /// Cancels all recurring career reminder notifications and stops active timers.
+  Future<void> cancelPeriodicCareerReminders() async {
+    _inAppPeriodicTimer?.cancel();
+    _inAppPeriodicTimer = null;
+
+    // Cancels scheduled alarms in the rolling queue
+    for (int i = 0; i < periodicReminderQueueSize; i++) {
+      try {
+        await _localNotifications.cancel(id: periodicReminderBaseId + i);
+      } catch (_) {}
+    }
+
+    _isPeriodicScheduled = false;
+  }
+
+  /// Syncs periodic reminders with user preferences stored in Firestore.
+  Future<void> syncPeriodicRemindersWithPreferences(String uid) async {
+    if (uid.isEmpty) return;
+
+    try {
+      final prefs = await _firestoreService.getNotificationPreferences(uid);
+      if (prefs.periodicReminderEnabled) {
+        await schedulePeriodicCareerReminders(
+          intervalMinutes: prefs.periodicReminderIntervalMinutes,
+        );
+      } else {
+        await cancelPeriodicCareerReminders();
+      }
+    } catch (e) {
+      debugPrint('Error syncing periodic reminders with preferences: $e');
+    }
   }
 }

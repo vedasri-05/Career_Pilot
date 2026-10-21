@@ -10,11 +10,15 @@ class GeminiApiException implements Exception {
   final String message;
   final int? statusCode;
   final bool isTransient;
+  final bool isQuotaExhausted;
+  final String? modelAttempted;
 
   const GeminiApiException(
     this.message, {
     this.statusCode,
     this.isTransient = false,
+    this.isQuotaExhausted = false,
+    this.modelAttempted,
   });
 
   @override
@@ -26,6 +30,8 @@ class GeminiService {
   final int maxRetries;
   final Duration initialDelay;
   final Duration maxDelay;
+  final bool enableModelFallback;
+  final List<String> fallbackModels;
   final Future<void> Function(Duration)? delayFn;
   final Random _random;
 
@@ -34,10 +40,12 @@ class GeminiService {
     this.maxRetries = 3,
     this.initialDelay = const Duration(milliseconds: 1500),
     this.maxDelay = const Duration(seconds: 10),
+    this.enableModelFallback = true,
+    this.fallbackModels = const ['gemini-1.5-flash', 'gemini-2.5-flash'],
     this.delayFn,
     Random? random,
-  }) : _customClient = client,
-       _random = random ?? Random();
+  })  : _customClient = client,
+        _random = random ?? Random();
 
   /// Calculates bounded exponential backoff delay with jitter.
   Duration calculateBackoffWithJitter(int retryIndex) {
@@ -60,27 +68,121 @@ class GeminiService {
     }
   }
 
-  bool _isTransientStatusCode(int statusCode) {
-    return statusCode == 503 ||
-        statusCode == 429 ||
-        statusCode == 500 ||
-        statusCode == 502 ||
-        statusCode == 504;
+  /// Parses server-recommended retry delay from Retry-After header or RetryInfo details.
+  Duration? _extractServerRetryDelay(
+    http.Response response,
+    Map<String, dynamic>? errorJson,
+  ) {
+    // 1. Check HTTP 'Retry-After' header (seconds)
+    final retryAfterHeader = response.headers['retry-after'];
+    if (retryAfterHeader != null) {
+      final seconds = int.tryParse(retryAfterHeader.trim());
+      if (seconds != null && seconds > 0) {
+        return Duration(seconds: seconds);
+      }
+    }
+
+    // 2. Check google.rpc.RetryInfo in error.details
+    if (errorJson != null && errorJson['error'] is Map) {
+      final details = errorJson['error']['details'] as List?;
+      if (details != null) {
+        for (final detail in details) {
+          if (detail is Map &&
+              detail['@type'] == 'type.googleapis.com/google.rpc.RetryInfo') {
+            final delayStr = detail['retryDelay'] as String?;
+            if (delayStr != null) {
+              final clean = delayStr.replaceAll('s', '').trim();
+              final sec = double.tryParse(clean);
+              if (sec != null && sec > 0) {
+                return Duration(milliseconds: (sec * 1000).round());
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
-  bool _isTransientMessage(String message, String errorStatus) {
-    if (errorStatus == 'UNAVAILABLE' || errorStatus == 'RESOURCE_EXHAUSTED') {
+  /// Inspects error details to determine if quota is exhausted (daily/project limits).
+  bool _detectHardQuotaExhaustion(
+    int statusCode,
+    String errorMessage,
+    String errorStatus,
+    Map<String, dynamic>? errorJson,
+    Duration? serverRetryDelay,
+  ) {
+    if (statusCode != 429 && errorStatus != 'RESOURCE_EXHAUSTED') {
+      return false;
+    }
+
+    final lowerMsg = errorMessage.toLowerCase();
+
+    // If server asks to wait longer than 30 seconds, it is not a 2-second rate burst
+    if (serverRetryDelay != null && serverRetryDelay.inSeconds > 30) {
       return true;
     }
-    final lower = message.toLowerCase();
-    return lower.contains('high demand') ||
-        lower.contains('temporarily overloaded') ||
-        lower.contains('resource exhausted') ||
-        lower.contains('spikes in demand') ||
-        lower.contains('try again later');
+
+    // Check message keywords
+    if (lowerMsg.contains('per day') ||
+        lowerMsg.contains('perday') ||
+        lowerMsg.contains('daily') ||
+        lowerMsg.contains('exhausted your capacity') ||
+        lowerMsg.contains('limit: 0') ||
+        lowerMsg.contains('quota exceeded for metric')) {
+      return true;
+    }
+
+    // Check violations in error.details
+    if (errorJson != null && errorJson['error'] is Map) {
+      final details = errorJson['error']['details'] as List?;
+      if (details != null) {
+        for (final detail in details) {
+          if (detail is Map && detail['violations'] is List) {
+            for (final v in detail['violations']) {
+              if (v is Map) {
+                final metric = (v['quotaMetric'] as String? ?? '').toLowerCase();
+                final desc = (v['description'] as String? ?? '').toLowerCase();
+                if (metric.contains('day') ||
+                    desc.contains('daily') ||
+                    desc.contains('per day') ||
+                    desc.contains('exhausted')) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
-  /// Analyzes the extracted resume text using the Gemini API with bounded exponential backoff.
+  /// Extracts human-readable quota violation summary if present.
+  String _extractViolationSummary(Map<String, dynamic>? errorJson) {
+    if (errorJson == null || errorJson['error'] is! Map) return '';
+    final details = errorJson['error']['details'] as List?;
+    if (details == null) return '';
+
+    for (final detail in details) {
+      if (detail is Map && detail['violations'] is List) {
+        final descriptions = (detail['violations'] as List)
+            .map((v) => v is Map
+                ? (v['description'] as String? ?? v['quotaMetric'] as String? ?? '')
+                : '')
+            .where((s) => s.isNotEmpty)
+            .join(', ');
+        if (descriptions.isNotEmpty) {
+          return ' ($descriptions)';
+        }
+      }
+    }
+    return '';
+  }
+
+  /// Analyzes the extracted resume text using the Gemini API.
   Future<ResumeAnalysisModel> analyzeResume(
     String resumeText, {
     void Function(String message)? onStatusUpdate,
@@ -99,10 +201,6 @@ class GeminiService {
         isTransient: false,
       );
     }
-
-    final endpoint = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/${GeminiConfig.modelName}:generateContent?key=$apiKey',
-    );
 
     final prompt =
         '''
@@ -157,177 +255,275 @@ You MUST respond strictly with a valid JSON object matching the following struct
 
     final client = _customClient ?? http.Client();
 
-    try {
-      int attempt = 0;
-      while (true) {
-        attempt++;
-        try {
-          final response = await client
-              .post(
-                endpoint,
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-goog-api-key': apiKey,
-                },
-                body: requestBody,
-              )
-              .timeout(const Duration(seconds: 45));
+    // Prepare list of models to try (primary model followed by fallbacks if enabled)
+    final modelsToTry = <String>[GeminiConfig.modelName];
+    if (enableModelFallback) {
+      for (final fb in fallbackModels) {
+        if (!modelsToTry.contains(fb)) {
+          modelsToTry.add(fb);
+        }
+      }
+    }
 
-          if (response.statusCode != 200) {
-            String errorMessage =
-                'Gemini API returned status ${response.statusCode}';
-            String errorStatus = '';
-            try {
-              final errorJson = jsonDecode(response.body);
-              if (errorJson['error'] != null) {
-                if (errorJson['error']['message'] != null) {
-                  errorMessage = errorJson['error']['message'];
-                }
-                if (errorJson['error']['status'] != null) {
-                  errorStatus = errorJson['error']['status'];
-                }
-                final details = errorJson['error']['details'] as List?;
-                if (details != null && details.isNotEmpty) {
-                  for (final detail in details) {
-                    if (detail is Map &&
-                        detail['reason'] == 'API_KEY_INVALID') {
-                      errorMessage = 'API_KEY_INVALID: $errorMessage';
+    try {
+      for (int mIndex = 0; mIndex < modelsToTry.length; mIndex++) {
+        final currentModel = modelsToTry[mIndex];
+        final isLastModel = mIndex == modelsToTry.length - 1;
+
+        final endpoint = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/$currentModel:generateContent?key=$apiKey',
+        );
+
+        int attempt = 0;
+        while (true) {
+          attempt++;
+          try {
+            final response = await client
+                .post(
+                  endpoint,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': apiKey,
+                  },
+                  body: requestBody,
+                )
+                .timeout(const Duration(seconds: 45));
+
+            if (response.statusCode != 200) {
+              String errorMessage =
+                  'Gemini API returned status ${response.statusCode}';
+              String errorStatus = '';
+              Map<String, dynamic>? errorJson;
+
+              try {
+                errorJson = jsonDecode(response.body) as Map<String, dynamic>?;
+                if (errorJson != null && errorJson['error'] is Map) {
+                  final err = errorJson['error'] as Map;
+                  if (err['message'] != null) {
+                    errorMessage = err['message'].toString();
+                  }
+                  if (err['status'] != null) {
+                    errorStatus = err['status'].toString();
+                  }
+                  final details = err['details'] as List?;
+                  if (details != null) {
+                    for (final detail in details) {
+                      if (detail is Map &&
+                          detail['reason'] == 'API_KEY_INVALID') {
+                        errorMessage = 'API_KEY_INVALID: $errorMessage';
+                      }
                     }
                   }
                 }
-              }
-            } catch (_) {
-              // Keep generic message
-            }
+              } catch (_) {}
 
-            // Non-retryable client errors (invalid key, forbidden, bad request)
-            if (response.statusCode == 400) {
-              if (errorMessage.contains('API_KEY_INVALID') ||
-                  errorMessage.toLowerCase().contains('api key not valid')) {
-                throw const GeminiApiException(
-                  'The provided Gemini API key is invalid. Please verify your API key.',
+              // Non-retryable permanent client errors
+              if (response.statusCode == 400) {
+                if (errorMessage.contains('API_KEY_INVALID') ||
+                    errorMessage.toLowerCase().contains('api key not valid')) {
+                  throw const GeminiApiException(
+                    'The provided Gemini API key is invalid. Please verify your API key.',
+                    statusCode: 400,
+                    isTransient: false,
+                  );
+                }
+                throw GeminiApiException(
+                  errorMessage,
                   statusCode: 400,
                   isTransient: false,
+                  modelAttempted: currentModel,
+                );
+              } else if (response.statusCode == 403) {
+                throw GeminiApiException(
+                  'Access forbidden ($errorMessage). Ensure your API key has Generative Language API enabled in Google Cloud/Google AI Studio.',
+                  statusCode: 403,
+                  isTransient: false,
+                  modelAttempted: currentModel,
                 );
               }
+
+              final serverRetryDelay =
+                  _extractServerRetryDelay(response, errorJson);
+              final isHardQuota = _detectHardQuotaExhaustion(
+                response.statusCode,
+                errorMessage,
+                errorStatus,
+                errorJson,
+                serverRetryDelay,
+              );
+              final violationSummary = _extractViolationSummary(errorJson);
+
+              // If hard quota is exhausted on this model, do not loop retries
+              if (isHardQuota) {
+                if (!isLastModel) {
+                  final nextModel = modelsToTry[mIndex + 1];
+                  onStatusUpdate?.call(
+                    'Quota reached for $currentModel. Switching to fallback model ($nextModel)...',
+                  );
+                  break; // Break attempt loop to proceed to next model in fallback list
+                }
+
+                throw GeminiApiException(
+                  'Gemini API quota exhausted for model $currentModel$violationSummary ($errorMessage). '
+                  'Daily quotas reset at midnight Pacific Time. Please check your project quota at '
+                  'https://aistudio.google.com or switch models via --dart-define=GEMINI_MODEL=gemini-1.5-flash.',
+                  statusCode: 429,
+                  isTransient: false,
+                  isQuotaExhausted: true,
+                  modelAttempted: currentModel,
+                );
+              }
+
+              // Check if transient error eligible for retry
+              final isTransient = response.statusCode == 503 ||
+                  response.statusCode == 429 ||
+                  response.statusCode == 500 ||
+                  response.statusCode == 502 ||
+                  response.statusCode == 504 ||
+                  errorStatus == 'UNAVAILABLE' ||
+                  errorStatus == 'RESOURCE_EXHAUSTED' ||
+                  errorMessage.toLowerCase().contains('high demand') ||
+                  errorMessage.toLowerCase().contains('temporarily overloaded');
+
+              if (isTransient && attempt <= maxRetries) {
+                // Respect server Retry-After / RetryInfo if specified, otherwise use jittered backoff
+                final delay = (serverRetryDelay != null &&
+                        serverRetryDelay.inSeconds <= 15)
+                    ? serverRetryDelay
+                    : calculateBackoffWithJitter(attempt - 1);
+
+                final statusNotice = response.statusCode == 429
+                    ? 'Rate limit reached on $currentModel. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...'
+                    : 'Gemini service is experiencing high demand. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
+                onStatusUpdate?.call(statusNotice);
+                await _sleep(delay);
+                continue;
+              }
+
+              // If retries exhausted and fallback models remain, try next model
+              if (!isLastModel && isTransient) {
+                final nextModel = modelsToTry[mIndex + 1];
+                onStatusUpdate?.call(
+                  '$currentModel unavailable after $maxRetries retries. Trying fallback model $nextModel...',
+                );
+                break;
+              }
+
+              // All retries and models exhausted
+              if (response.statusCode == 503 ||
+                  errorMessage.contains('high demand') ||
+                  errorStatus == 'UNAVAILABLE') {
+                throw GeminiApiException(
+                  'Gemini model ($currentModel) is currently experiencing high demand after $maxRetries retry attempts. '
+                  'Spikes in demand are temporary. Please try again in a few moments or switch to gemini-1.5-flash.',
+                  statusCode: 503,
+                  isTransient: true,
+                  modelAttempted: currentModel,
+                );
+              } else if (response.statusCode == 429 ||
+                  errorStatus == 'RESOURCE_EXHAUSTED') {
+                throw GeminiApiException(
+                  'Rate limit or quota exceeded for model $currentModel after $maxRetries retry attempts$violationSummary. '
+                  'Please check your Google AI Studio project quota or wait a few moments before trying again.',
+                  statusCode: 429,
+                  isTransient: true,
+                  isQuotaExhausted: true,
+                  modelAttempted: currentModel,
+                );
+              }
+
               throw GeminiApiException(
                 errorMessage,
-                statusCode: 400,
-                isTransient: false,
-              );
-            } else if (response.statusCode == 403) {
-              throw GeminiApiException(
-                'Access forbidden ($errorMessage). Ensure your API key has Generative Language API enabled.',
-                statusCode: 403,
-                isTransient: false,
+                statusCode: response.statusCode,
+                isTransient: isTransient,
+                modelAttempted: currentModel,
               );
             }
 
-            // Check if transient error eligible for retry
-            final isTransient =
-                _isTransientStatusCode(response.statusCode) ||
-                _isTransientMessage(errorMessage, errorStatus);
+            final responseData = jsonDecode(response.body);
+            final candidates = responseData['candidates'] as List?;
+            if (candidates == null || candidates.isEmpty) {
+              throw const GeminiApiException(
+                'No analysis generated by Gemini. Please try again.',
+              );
+            }
 
-            if (isTransient && attempt <= maxRetries) {
+            final candidate = candidates.first;
+            final content = candidate['content'];
+            final parts = content?['parts'] as List?;
+            if (parts == null || parts.isEmpty) {
+              throw const GeminiApiException(
+                'Gemini returned an empty response. Please try again.',
+              );
+            }
+
+            String rawText = parts.first['text'] as String? ?? '';
+            rawText = rawText.trim();
+
+            // Clean markdown code blocks if present
+            if (rawText.startsWith('```json')) {
+              rawText = rawText.substring(7);
+            } else if (rawText.startsWith('```')) {
+              rawText = rawText.substring(3);
+            }
+            if (rawText.endsWith('```')) {
+              rawText = rawText.substring(0, rawText.length - 3);
+            }
+            rawText = rawText.trim();
+
+            final parsedJson = jsonDecode(rawText) as Map<String, dynamic>;
+            return ResumeAnalysisModel.fromJson(parsedJson);
+          } on TimeoutException {
+            if (attempt <= maxRetries) {
               final delay = calculateBackoffWithJitter(attempt - 1);
               final statusNotice =
-                  'Gemini model is currently experiencing high demand. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
+                  'Connection timed out. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
               onStatusUpdate?.call(statusNotice);
               await _sleep(delay);
               continue;
             }
-
-            // Exhausted retries or non-retryable server error
-            if (response.statusCode == 503 ||
-                errorMessage.contains('high demand') ||
-                errorStatus == 'UNAVAILABLE') {
-              throw GeminiApiException(
-                'Gemini model is currently experiencing high demand after $maxRetries retry attempts. Spikes in demand are usually temporary. Please try again in a few moments.',
-                statusCode: 503,
-                isTransient: true,
+            if (!isLastModel) {
+              final nextModel = modelsToTry[mIndex + 1];
+              onStatusUpdate?.call(
+                'Connection timed out on $currentModel. Trying fallback model $nextModel...',
               );
-            } else if (response.statusCode == 429 ||
-                errorStatus == 'RESOURCE_EXHAUSTED') {
-              throw GeminiApiException(
-                'Rate limit or quota exceeded after $maxRetries retry attempts. Please wait a moment and try again.',
-                statusCode: 429,
-                isTransient: true,
-              );
+              break;
             }
-
             throw GeminiApiException(
-              errorMessage,
-              statusCode: response.statusCode,
-              isTransient: isTransient,
+              'Gemini analysis request timed out after $maxRetries retry attempts. Please check your internet connection and try again.',
+              isTransient: true,
+              modelAttempted: currentModel,
+            );
+          } on GeminiApiException {
+            rethrow;
+          } on FormatException catch (e) {
+            throw GeminiApiException(
+              'Failed to parse analysis results from Gemini: ${e.message}',
+              modelAttempted: currentModel,
+            );
+          } catch (e) {
+            if (attempt <= maxRetries) {
+              final delay = calculateBackoffWithJitter(attempt - 1);
+              final statusNotice =
+                  'Network connection glitch. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
+              onStatusUpdate?.call(statusNotice);
+              await _sleep(delay);
+              continue;
+            }
+            if (!isLastModel) {
+              break;
+            }
+            throw GeminiApiException(
+              'Network error while connecting to Gemini: $e',
+              modelAttempted: currentModel,
             );
           }
-
-          final responseData = jsonDecode(response.body);
-          final candidates = responseData['candidates'] as List?;
-          if (candidates == null || candidates.isEmpty) {
-            throw const GeminiApiException(
-              'No analysis generated by Gemini. Please try again.',
-            );
-          }
-
-          final candidate = candidates.first;
-          final content = candidate['content'];
-          final parts = content?['parts'] as List?;
-          if (parts == null || parts.isEmpty) {
-            throw const GeminiApiException(
-              'Gemini returned an empty response. Please try again.',
-            );
-          }
-
-          String rawText = parts.first['text'] as String? ?? '';
-          rawText = rawText.trim();
-
-          // Clean markdown code blocks if present
-          if (rawText.startsWith('```json')) {
-            rawText = rawText.substring(7);
-          } else if (rawText.startsWith('```')) {
-            rawText = rawText.substring(3);
-          }
-          if (rawText.endsWith('```')) {
-            rawText = rawText.substring(0, rawText.length - 3);
-          }
-          rawText = rawText.trim();
-
-          final parsedJson = jsonDecode(rawText) as Map<String, dynamic>;
-          return ResumeAnalysisModel.fromJson(parsedJson);
-        } on TimeoutException {
-          if (attempt <= maxRetries) {
-            final delay = calculateBackoffWithJitter(attempt - 1);
-            final statusNotice =
-                'Connection timed out. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
-            onStatusUpdate?.call(statusNotice);
-            await _sleep(delay);
-            continue;
-          }
-          throw GeminiApiException(
-            'Gemini analysis request timed out after $maxRetries retry attempts. Please check your internet connection and try again.',
-            isTransient: true,
-          );
-        } on GeminiApiException {
-          rethrow;
-        } on FormatException catch (e) {
-          throw GeminiApiException(
-            'Failed to parse analysis results from Gemini: ${e.message}',
-          );
-        } catch (e) {
-          if (attempt <= maxRetries) {
-            final delay = calculateBackoffWithJitter(attempt - 1);
-            final statusNotice =
-                'Network connection glitch. Retrying in ${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s (attempt $attempt of $maxRetries)...';
-            onStatusUpdate?.call(statusNotice);
-            await _sleep(delay);
-            continue;
-          }
-          throw GeminiApiException(
-            'Network error while connecting to Gemini: $e',
-          );
         }
       }
+
+      throw const GeminiApiException(
+        'Unable to analyze resume after attempting available models. Please check your network and Google AI Studio quota.',
+      );
     } finally {
       if (_customClient == null) {
         client.close();
