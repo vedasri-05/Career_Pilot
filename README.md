@@ -1,17 +1,175 @@
-# career_pilot
+# 🚀 CareerPilot
 
-A new Flutter project.
+**Your AI-Powered Career Guidance Platform**
 
-## Getting Started
+CareerPilot is a Flutter-based career guidance application designed to help users improve their resumes, explore career opportunities, plan their professional growth, and prepare for interviews.
 
-This project is a starting point for a Flutter application.
+## ✨ Features
 
-A few resources to get you started if this is your first Flutter project:
+- 🔐 **User Authentication** — Secure sign-up and login using Firebase Authentication, including email verification.
+- 📄 **AI Resume Analysis** — Analyze resumes using Google's Gemini AI to identify strengths, weaknesses, skills, and areas for improvement.
+- 🎯 **Career Recommendations** — Discover career paths and opportunities relevant to your skills, interests, and career goals.
+- 💼 **Job Discovery** — Explore relevant job opportunities and access job application links when a job data source is configured.
+- 🗺️ **Personalized Career Roadmap** — Get a structured plan to develop skills and work toward your career goals.
+- 🎤 **AI Mock Interviews** — Practice interview questions and receive feedback to improve your interview performance.
+- 👤 **User Profile** — Manage profile information and career preferences.
+- ☁️ **Cloud Firestore** — Store and retrieve user information and supported application data.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+*Note: Feature availability depends on implementation and configuration. External job discovery requires a suitable job data source.*
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Technologies Used
+
+| Technology | Purpose |
+|---|---|
+| Flutter | Cross-platform user interface |
+| Dart | Application development |
+| Firebase Authentication | User registration and login |
+| Cloud Firestore | Cloud database |
+| Google Gemini API | AI-powered career features |
+| Visual Studio Code | Development environment |
+| Git and GitHub | Version control and collaboration |
+
+## 📁 Project Structure
+
+```text
+Career_pilot/
+├── android/
+├── lib/
+│   ├── config/
+│   ├── models/
+│   ├── screens/
+│   ├── services/
+│   ├── theme/
+│   └── main.dart
+├── test/
+├── pubspec.yaml
+├── pubspec.lock
+└── README.md
+```
+
+*The structure above is illustrative. Your actual folders may differ depending on the current implementation.*
+
+## ⚙️ Getting Started
+
+### Prerequisites
+
+Install the following:
+
+- [Flutter SDK](https://docs.flutter.dev/get-started/install)
+- [Dart SDK](https://dart.dev/get-dart)
+- [Visual Studio Code](https://code.visualstudio.com/)
+- [Git](https://git-scm.com/)
+- A Firebase project configured for the application
+- A Gemini API key for AI features
+
+### Installation
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/YOUR_USERNAME/Career_pilot.git
+```
+
+Replace `YOUR_USERNAME` with your GitHub username.
+
+**2. Open the project**
+
+```bash
+cd Career_pilot
+```
+
+**3. Install dependencies**
+
+```bash
+flutter pub get
+```
+
+**4. Configure Firebase**
+
+Use your existing Firebase project and configure the required platforms. Follow the [FlutterFire setup guide](https://firebase.google.com/docs/flutter/setup).
+
+Do not upload private service-account credentials or other secrets to GitHub.
+
+**5. Configure the Gemini API key**
+
+For local development, if the application reads the key through `String.fromEnvironment('GEMINI_API_KEY')`, run:
+
+```bash
+flutter run -d chrome --dart-define=GEMINI_API_KEY=YOUR_API_KEY
+```
+
+Replace `YOUR_API_KEY` locally with your own key. Never commit real API keys to the repository.
+
+For production deployments, use a secure backend to protect API credentials.
+
+## ▶️ Running the Application
+
+To run on Chrome:
+
+```bash
+flutter run -d chrome
+```
+
+If Gemini requires a compile-time API key, use the configured `--dart-define` command shown above.
+
+To run on a connected Android device:
+
+```bash
+flutter devices
+flutter run -d YOUR_DEVICE_ID
+```
+
+Replace `YOUR_DEVICE_ID` with the device ID reported by Flutter.
+
+## 🧪 Testing
+
+Check code quality:
+
+```bash
+flutter analyze
+```
+
+Run automated tests:
+
+```bash
+flutter test
+```
+
+Test authentication, resume uploads, AI responses, Firestore persistence, and navigation in the running application as well.
+
+## 📱 Building for Android
+
+When the application is ready for release, run:
+
+```bash
+flutter build apk --release
+```
+
+If the Gemini configuration requires a compile-time key, supply it to the release build using the appropriate `--dart-define` configuration. Remember that embedding a key in an APK does not keep it secret.
+
+The generated APK is normally located at:
+
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+## 🔒 Security
+
+- Never commit API keys or passwords.
+- Configure Firebase Authentication and Firestore security rules appropriately.
+- Restrict user data access to authorized users.
+- Keep production AI credentials on a secure backend.
+- Validate uploaded file types and file sizes.
+- Avoid storing unnecessary sensitive information.
+
+## 🎯 Project Objective
+
+CareerPilot aims to make career planning more accessible by bringing resume feedback, career exploration, personalized learning guidance, and interview preparation together in one application.
+
+## 👥 Contributors
+
+Add your team members' names and their contributions here.
+
+## 📄 License
+
+No license has been specified yet. Add a license if required by your project or institution.
