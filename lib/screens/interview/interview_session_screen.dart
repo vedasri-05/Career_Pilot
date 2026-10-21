@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../../models/mock_interview_model.dart';
 import '../../services/mock_interview_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/voice_assistant_service.dart';
 import '../../theme/app_theme.dart';
 import 'interview_result_screen.dart';
 
@@ -11,6 +13,7 @@ class InterviewSessionScreen extends StatefulWidget {
   final String difficulty;
   final String type;
   final int questionCount;
+  final bool isVoiceMode;
 
   const InterviewSessionScreen({
     super.key,
@@ -18,6 +21,7 @@ class InterviewSessionScreen extends StatefulWidget {
     required this.difficulty,
     required this.type,
     this.questionCount = 5,
+    this.isVoiceMode = true,
   });
 
   @override
@@ -26,6 +30,7 @@ class InterviewSessionScreen extends StatefulWidget {
 
 class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
   final MockInterviewService _service = MockInterviewService();
+  final VoiceAssistantService _voiceService = VoiceAssistantService();
   final TextEditingController _answerController = TextEditingController();
 
   List<MockInterviewQuestion> _questions = [];
@@ -37,14 +42,20 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
   MockInterviewAnswer? _currentEvaluation;
   String _errorMessage = '';
 
+  late bool _isVoiceMode;
+  bool _isListening = false;
+  bool _isSpeaking = false;
+
   @override
   void initState() {
     super.initState();
+    _isVoiceMode = widget.isVoiceMode;
     _loadQuestions();
   }
 
   @override
   void dispose() {
+    _voiceService.dispose();
     _answerController.dispose();
     super.dispose();
   }
@@ -68,6 +79,11 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
           _questions = questions;
           _isLoadingQuestions = false;
         });
+
+        // If in voice mode, speak the first question
+        if (_isVoiceMode && questions.isNotEmpty) {
+          _speakQuestion(questions.first.question);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -79,12 +95,75 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
     }
   }
 
+  Future<void> _speakQuestion(String text) async {
+    if (!_isVoiceMode) return;
+    setState(() => _isSpeaking = true);
+    await _voiceService.speak(
+      text,
+      onComplete: () {
+        if (mounted) setState(() => _isSpeaking = false);
+      },
+    );
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      await _voiceService.stopListening();
+      setState(() => _isListening = false);
+    } else {
+      // Stop speech playback before listening
+      await _voiceService.stopSpeaking();
+      setState(() {
+        _isSpeaking = false;
+      });
+
+      final started = await _voiceService.startListening(
+        onResult: (words) {
+          if (mounted) {
+            setState(() {
+              _answerController.text = words;
+              _answerController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _answerController.text.length),
+              );
+            });
+          }
+        },
+        onDone: () {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+
+      if (!started && mounted) {
+        setState(() => _isListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Microphone access was denied or is unavailable. You can type your answer in the text box below.',
+            ),
+            backgroundColor: AppTheme.amber,
+          ),
+        );
+      } else {
+        setState(() => _isListening = true);
+      }
+    }
+  }
+
   Future<void> _submitAnswer() async {
+    // Stop microphone & TTS before submitting
+    await _voiceService.stopListening();
+    await _voiceService.stopSpeaking();
+    if (!mounted) return;
+    setState(() {
+      _isListening = false;
+      _isSpeaking = false;
+    });
+
     final text = _answerController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please enter your response before submitting.'),
+          content: Text('Please provide an answer before submitting.'),
           backgroundColor: AppTheme.amber,
         ),
       );
@@ -108,6 +187,13 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
           _recordedAnswers.add(evaluation);
           _isEvaluating = false;
         });
+
+        // Speak evaluation summary if voice mode is on
+        if (_isVoiceMode) {
+          final feedbackSummary =
+              'Score: ${evaluation.score} out of 10. ${evaluation.strengths.isNotEmpty ? evaluation.strengths.first : ""}';
+          _voiceService.speak(feedbackSummary);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -125,18 +211,30 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
   }
 
   void _nextQuestion() {
+    _voiceService.stopListening();
+    _voiceService.stopSpeaking();
+
     if (_currentIndex + 1 < _questions.length) {
       setState(() {
         _currentIndex++;
         _currentEvaluation = null;
         _answerController.clear();
+        _isListening = false;
+        _isSpeaking = false;
       });
+
+      if (_isVoiceMode) {
+        _speakQuestion(_questions[_currentIndex].question);
+      }
     } else {
       _finalizeInterviewSession();
     }
   }
 
   Future<void> _finalizeInterviewSession() async {
+    _voiceService.stopListening();
+    _voiceService.stopSpeaking();
+
     // Calculate overall score (average of answers mapped to 100)
     int totalScore = 0;
     final Map<String, List<int>> categoryScores = {};
@@ -199,6 +297,10 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
     if (uid != null && uid.isNotEmpty) {
       try {
         await _service.saveSession(uid, session);
+        await NotificationService().showMockInterviewCompletedNotification(
+          uid: uid,
+          session: session,
+        );
       } catch (_) {
         // Continue to result screen even if Firestore fails
       }
@@ -211,6 +313,22 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
           builder: (context) => InterviewResultScreen(session: session),
         ),
       );
+    }
+  }
+
+  void _toggleVoiceMode() {
+    setState(() {
+      _isVoiceMode = !_isVoiceMode;
+    });
+    if (!_isVoiceMode) {
+      _voiceService.stopListening();
+      _voiceService.stopSpeaking();
+      setState(() {
+        _isListening = false;
+        _isSpeaking = false;
+      });
+    } else if (_questions.isNotEmpty && _currentEvaluation == null) {
+      _speakQuestion(_questions[_currentIndex].question);
     }
   }
 
@@ -279,6 +397,19 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
           'Question ${_currentIndex + 1} of ${_questions.length}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          // Voice Mode Toggle Action
+          IconButton(
+            tooltip: _isVoiceMode
+                ? 'Switch to Text Mode'
+                : 'Switch to Voice Mode',
+            icon: Icon(
+              _isVoiceMode ? Icons.mic_rounded : Icons.keyboard_alt_outlined,
+              color: _isVoiceMode ? AppTheme.primaryBlue : Colors.grey,
+            ),
+            onPressed: _toggleVoiceMode,
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(4),
           child: LinearProgressIndicator(
@@ -336,6 +467,44 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
                       ),
                     ),
                   ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _isVoiceMode
+                          ? const Color(0xFF059669).withValues(alpha: 0.1)
+                          : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _isVoiceMode
+                              ? Icons.record_voice_over
+                              : Icons.text_snippet,
+                          size: 13,
+                          color: _isVoiceMode
+                              ? const Color(0xFF059669)
+                              : AppTheme.textMedium,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _isVoiceMode ? 'Voice Mode' : 'Text Mode',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: _isVoiceMode
+                                ? const Color(0xFF059669)
+                                : AppTheme.textMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
 
@@ -362,26 +531,58 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Icon(
-                          Icons.help_outline_rounded,
-                          color: AppTheme.primaryBlue,
-                          size: 20,
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.help_outline_rounded,
+                              color: AppTheme.primaryBlue,
+                              size: 20,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Interview Prompt',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primaryBlue,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
-                        SizedBox(width: 8),
-                        Text(
-                          'Interview Prompt',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primaryBlue,
-                            letterSpacing: 0.5,
+
+                        // Audio playback controls for question
+                        if (_isVoiceMode)
+                          Row(
+                            children: [
+                              IconButton(
+                                tooltip: _isSpeaking
+                                    ? 'Stop Audio'
+                                    : 'Replay Question Aloud',
+                                icon: Icon(
+                                  _isSpeaking
+                                      ? Icons.stop_circle_rounded
+                                      : Icons.volume_up_rounded,
+                                  color: AppTheme.primaryBlue,
+                                  size: 24,
+                                ),
+                                onPressed: () {
+                                  if (_isSpeaking) {
+                                    _voiceService.stopSpeaking();
+                                    setState(() => _isSpeaking = false);
+                                  } else {
+                                    _speakQuestion(currentQuestion.question);
+                                  }
+                                },
+                              ),
+                            ],
                           ),
-                        ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     Text(
                       currentQuestion.question,
                       style: const TextStyle(
@@ -397,23 +598,132 @@ class _InterviewSessionScreenState extends State<InterviewSessionScreen> {
 
               const SizedBox(height: 20),
 
-              // CANDIDATE ANSWER FIELD
-              const Text(
-                'Your Answer',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              // VOICE ASSISTANT MIC CONTROLS (IF VOICE MODE ACTIVE)
+              if (_isVoiceMode && _currentEvaluation == null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _isListening
+                        ? const Color(0xFFECFDF5)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _isListening
+                          ? const Color(0xFF059669)
+                          : const Color(0xFFE2E8F0),
+                      width: _isListening ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        onTap: _toggleListening,
+                        borderRadius: BorderRadius.circular(40),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: 68,
+                          height: 68,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isListening
+                                ? const Color(0xFF059669)
+                                : AppTheme.primaryBlue,
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    (_isListening
+                                            ? const Color(0xFF059669)
+                                            : AppTheme.primaryBlue)
+                                        .withValues(alpha: 0.35),
+                                blurRadius: _isListening ? 20 : 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            _isListening
+                                ? Icons.mic_rounded
+                                : Icons.mic_none_rounded,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _isListening
+                            ? 'Listening... Speak your response naturally'
+                            : 'Tap Microphone to Speak Your Answer',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: _isListening
+                              ? const Color(0xFF059669)
+                              : AppTheme.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _isListening
+                            ? 'Tap again to pause. You can edit the text below anytime.'
+                            : 'Spoken words stream into the text box below for review.',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textMedium,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(height: 16),
+              ],
+
+              // CANDIDATE ANSWER FIELD (EDITABLE TRANSCRIPT)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Your Answer (Editable Transcript)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                  if (_isListening)
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF059669),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Transcribing...',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF059669),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _answerController,
-                maxLines: 7,
+                maxLines: 6,
                 enabled: _currentEvaluation == null && !_isEvaluating,
                 decoration: InputDecoration(
-                  hintText:
-                      'Type your detailed answer here as if speaking to an interviewer. Explain your thought process, principles, and trade-offs...',
+                  hintText: _isVoiceMode
+                      ? 'Speak your answer above, or tap here to type or edit recognized words...'
+                      : 'Type your answer here as if speaking to an interviewer. Explain your thought process, principles, and trade-offs...',
                   filled: true,
                   fillColor: Colors.white,
                   contentPadding: const EdgeInsets.all(16),

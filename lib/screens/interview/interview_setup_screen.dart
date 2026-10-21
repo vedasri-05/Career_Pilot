@@ -19,6 +19,7 @@ class _InterviewSetupScreenState extends State<InterviewSetupScreen> {
   String _selectedDifficulty = 'Mid-Level';
   String _selectedType = 'Mixed';
   int _questionCount = 5;
+  bool _isVoiceMode = true; // Voice Assistant enabled by default
 
   final List<String> _availableRoles = [
     'Flutter Developer',
@@ -101,6 +102,7 @@ class _InterviewSetupScreenState extends State<InterviewSetupScreen> {
           difficulty: _selectedDifficulty,
           type: _selectedType,
           questionCount: _questionCount,
+          isVoiceMode: _isVoiceMode,
         ),
       ),
     );
@@ -223,9 +225,143 @@ class _InterviewSetupScreenState extends State<InterviewSetupScreen> {
 
               const SizedBox(height: 22),
 
-              // 2. DIFFICULTY
+              // INTERACTION MODE (VOICE VS TEXT)
               const Text(
-                '2. Experience / Seniority Level',
+                '2. Interview Format',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => setState(() => _isVoiceMode = true),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: _isVoiceMode
+                              ? AppTheme.primaryBlue.withValues(alpha: 0.08)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _isVoiceMode
+                                ? AppTheme.primaryBlue
+                                : const Color(0xFFE2E8F0),
+                            width: _isVoiceMode ? 2 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: _isVoiceMode
+                                    ? AppTheme.primaryBlue
+                                    : const Color(0xFFF1F5F9),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.mic_rounded,
+                                color: _isVoiceMode
+                                    ? Colors.white
+                                    : AppTheme.textDark,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Voice Assistant',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.textDark,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            const Text(
+                              'Spoken Q&A',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMedium,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => setState(() => _isVoiceMode = false),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: !_isVoiceMode
+                              ? AppTheme.primaryBlue.withValues(alpha: 0.08)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: !_isVoiceMode
+                                ? AppTheme.primaryBlue
+                                : const Color(0xFFE2E8F0),
+                            width: !_isVoiceMode ? 2 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: !_isVoiceMode
+                                    ? AppTheme.primaryBlue
+                                    : const Color(0xFFF1F5F9),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.keyboard_alt_outlined,
+                                color: !_isVoiceMode
+                                    ? Colors.white
+                                    : AppTheme.textDark,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Text Mode',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.textDark,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            const Text(
+                              'Written Q&A',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.textMedium,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 22),
+
+              // 3. DIFFICULTY
+              const Text(
+                '3. Experience / Seniority Level',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -266,9 +402,9 @@ class _InterviewSetupScreenState extends State<InterviewSetupScreen> {
 
               const SizedBox(height: 22),
 
-              // 3. INTERVIEW TYPE
+              // 4. INTERVIEW TYPE
               const Text(
-                '3. Interview Style',
+                '4. Interview Style',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -344,9 +480,9 @@ class _InterviewSetupScreenState extends State<InterviewSetupScreen> {
 
               const SizedBox(height: 20),
 
-              // 4. QUESTION COUNT
+              // 5. QUESTION COUNT
               const Text(
-                '4. Number of Questions',
+                '5. Number of Questions',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,

@@ -1,10 +1,13 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../services/firestore_service.dart';
+import '../../services/notification_service.dart';
 import '../../services/roadmap_service.dart';
 import '../../theme/app_theme.dart';
 import '../careers/careers_screen.dart';
 import '../interview/interview_hub_screen.dart';
+import '../notifications/notifications_screen.dart';
 import '../profile/profile_screen.dart';
 import '../resume/upload_resume_screen.dart';
 import '../roadmap/career_path_form_screen.dart';
@@ -22,9 +25,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   User? get currentUser => FirebaseAuth.instance.currentUser;
 
+  @override
+  void initState() {
+    super.initState();
+    _initNotifications();
+  }
+
+  Future<void> _initNotifications() async {
+    final user = currentUser;
+    if (user != null) {
+      await NotificationService().initialize();
+      final profile = await FirestoreService().getUserProfile(user.uid);
+      if (profile != null && profile.careerGoal.isNotEmpty) {
+        await NotificationService().checkAndNotifyNewJobs(
+          uid: user.uid,
+          careerGoal: profile.careerGoal,
+        );
+      }
+    }
+  }
+
   // ==========================================
   // NAVIGATION ACTIONS
   // ==========================================
+
+  void _openNotifications() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const NotificationsScreen()),
+    );
+  }
 
   void _openProfile() {
     Navigator.push(
@@ -214,6 +244,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ],
                         ),
                       ),
+
+                      // NOTIFICATION BELL WITH LIVE UNREAD BADGE
+                      StreamBuilder<int>(
+                        stream: user != null
+                            ? FirestoreService()
+                                  .getUnreadNotificationsCountStream(user.uid)
+                            : const Stream.empty(),
+                        builder: (context, snapshot) {
+                          final unread = snapshot.data ?? 0;
+                          return Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 46,
+                                height: 46,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFFE2E8F0),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.04,
+                                      ),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: IconButton(
+                                  onPressed: _openNotifications,
+                                  padding: EdgeInsets.zero,
+                                  icon: const Icon(
+                                    Icons.notifications_outlined,
+                                    size: 24,
+                                    color: AppTheme.darkBlue,
+                                  ),
+                                ),
+                              ),
+                              if (unread > 0)
+                                Positioned(
+                                  right: -2,
+                                  top: -2,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.rose,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 18,
+                                      minHeight: 18,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        unread > 9 ? '9+' : '$unread',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+
+                      const SizedBox(width: 10),
 
                       // PROFILE BUTTON
                       InkWell(

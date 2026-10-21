@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/roadmap_model.dart';
+import '../../services/notification_service.dart';
 import '../../services/roadmap_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -27,6 +28,17 @@ class _RoadmapScreenState extends State<RoadmapScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null && uid.isNotEmpty) {
       RoadmapService.saveUserRoadmap(uid, _roadmap);
+
+      // Check if any stage was newly completed to celebrate
+      for (final stage in _roadmap.stages) {
+        if (stage.isCompleted) {
+          NotificationService().showRoadmapStageCompletedNotification(
+            uid: uid,
+            stageNumber: stage.stageNumber,
+            stageTitle: stage.title,
+          );
+        }
+      }
     }
   }
 

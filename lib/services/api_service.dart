@@ -56,24 +56,47 @@ class ApiService {
   /// Maps a candidate's target career goal to effective search queries.
   static String mapGoalToSearchQuery(String careerGoal) {
     final lower = careerGoal.toLowerCase().trim();
-    if (lower.contains('flutter')) return 'flutter';
-    if (lower.contains('mobile')) return 'mobile';
-    if (lower.contains('web')) return 'frontend';
-    if (lower.contains('data analyst')) return 'data analyst';
-    if (lower.contains('data scientist')) return 'data science';
-    if (lower.contains('machine learning') || lower.contains('ai'))
+    if (lower.contains('flutter')) {
+      return 'flutter';
+    }
+    if (lower.contains('mobile')) {
+      return 'mobile';
+    }
+    if (lower.contains('web')) {
+      return 'frontend';
+    }
+    if (lower.contains('data analyst')) {
+      return 'data analyst';
+    }
+    if (lower.contains('data scientist')) {
+      return 'data science';
+    }
+    if (lower.contains('machine learning') || lower.contains('ai')) {
       return 'machine learning';
-    if (lower.contains('cyber') || lower.contains('security'))
+    }
+    if (lower.contains('cyber') || lower.contains('security')) {
       return 'security';
-    if (lower.contains('cloud')) return 'cloud';
+    }
+    if (lower.contains('cloud')) {
+      return 'cloud';
+    }
     if (lower.contains('ui') ||
         lower.contains('ux') ||
-        lower.contains('designer'))
+        lower.contains('designer')) {
       return 'designer';
-    if (lower.contains('product manager')) return 'product manager';
-    if (lower.contains('business analyst')) return 'business analyst';
-    if (lower.contains('devops')) return 'devops';
-    if (lower.contains('software')) return 'software';
+    }
+    if (lower.contains('product manager')) {
+      return 'product manager';
+    }
+    if (lower.contains('business analyst')) {
+      return 'business analyst';
+    }
+    if (lower.contains('devops')) {
+      return 'devops';
+    }
+    if (lower.contains('software')) {
+      return 'software';
+    }
     return lower.isNotEmpty ? lower : 'developer';
   }
 }

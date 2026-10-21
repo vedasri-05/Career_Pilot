@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/job_model.dart';
+import '../models/notification_model.dart';
 import '../models/user_model.dart';
 
 class FirestoreService {
@@ -133,5 +134,112 @@ class FirestoreService {
       data['id'] = doc.id;
       return data;
     }).toList();
+  }
+
+  // ============================================================
+  // NOTIFICATIONS & PREFERENCES
+  // ============================================================
+
+  CollectionReference<Map<String, dynamic>> _notificationsRef(String uid) {
+    return _firestore.collection('users').doc(uid).collection('notifications');
+  }
+
+  Future<void> saveNotification(
+    String uid,
+    AppNotification notification,
+  ) async {
+    await _notificationsRef(uid).doc(notification.id).set(notification.toMap());
+  }
+
+  Stream<List<AppNotification>> getNotificationsStream(String uid) {
+    return _notificationsRef(uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => AppNotification.fromMap(doc.data()))
+              .toList(),
+        );
+  }
+
+  Stream<int> getUnreadNotificationsCountStream(String uid) {
+    return _notificationsRef(uid)
+        .where('isRead', isEqualTo: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
+
+  Future<void> markNotificationAsRead(String uid, String notificationId) async {
+    await _notificationsRef(uid).doc(notificationId).update({'isRead': true});
+  }
+
+  Future<void> markAllNotificationsAsRead(String uid) async {
+    final unread = await _notificationsRef(
+      uid,
+    ).where('isRead', isEqualTo: false).get();
+    final batch = _firestore.batch();
+    for (final doc in unread.docs) {
+      batch.update(doc.reference, {'isRead': true});
+    }
+    await batch.commit();
+  }
+
+  Future<void> deleteNotification(String uid, String notificationId) async {
+    await _notificationsRef(uid).doc(notificationId).delete();
+  }
+
+  Future<void> clearAllNotifications(String uid) async {
+    final all = await _notificationsRef(uid).get();
+    final batch = _firestore.batch();
+    for (final doc in all.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
+  DocumentReference<Map<String, dynamic>> _prefsRef(String uid) {
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('settings')
+        .doc('notification_preferences');
+  }
+
+  Future<NotificationPreferences> getNotificationPreferences(String uid) async {
+    final doc = await _prefsRef(uid).get();
+    if (!doc.exists || doc.data() == null) {
+      return const NotificationPreferences();
+    }
+    return NotificationPreferences.fromMap(doc.data()!);
+  }
+
+  Future<void> saveNotificationPreferences(
+    String uid,
+    NotificationPreferences prefs,
+  ) async {
+    await _prefsRef(uid).set(prefs.toMap(), SetOptions(merge: true));
+  }
+
+  DocumentReference<Map<String, dynamic>> _seenJobsRef(String uid) {
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('notification_meta')
+        .doc('jobs_seen');
+  }
+
+  Future<Set<String>> getSeenJobIds(String uid) async {
+    final doc = await _seenJobsRef(uid).get();
+    if (!doc.exists || doc.data() == null) return {};
+    final list = doc.data()?['jobIds'] as List? ?? [];
+    return list.map((e) => e.toString()).toSet();
+  }
+
+  Future<void> recordSeenJobIds(String uid, List<String> newJobIds) async {
+    if (newJobIds.isEmpty) return;
+    await _seenJobsRef(uid).set({
+      'jobIds': FieldValue.arrayUnion(newJobIds),
+      'updatedAt': DateTime.now().toIso8601String(),
+    }, SetOptions(merge: true));
   }
 }
