@@ -34,14 +34,89 @@ CareerPilot is a Flutter-based career guidance application designed to help user
 ```text
 Career_pilot/
 ├── android/
+├── assets/
+│   └── images/
+│       └── careerpilot_logo.jpeg
 ├── lib/
 │   ├── config/
+│   │   └── gemini_config.dart
 │   ├── models/
+│   │   ├── career_path_profile.dart
+│   │   ├── job_model.dart
+│   │   ├── mock_interview_model.dart
+│   │   ├── notification_model.dart
+│   │   ├── resume_analysis_model.dart
+│   │   ├── roadmap_model.dart
+│   │   └── user_model.dart
 │   ├── screens/
+│   │   ├── auth/
+│   │   │   ├── email_verification_screen.dart
+│   │   │   ├── login_screen.dart
+│   │   │   └── signup_screen.dart
+│   │   ├── careers/
+│   │   │   └── careers_screen.dart
+│   │   ├── dashboard/
+│   │   │   └── dashboard_screen.dart
+│   │   ├── interview/
+│   │   │   ├── interview_hub_screen.dart
+│   │   │   ├── interview_result_screen.dart
+│   │   │   ├── interview_session_screen.dart
+│   │   │   └── interview_setup_screen.dart
+│   │   ├── notifications/
+│   │   │   └── notifications_screen.dart
+│   │   ├── profile/
+│   │   │   └── profile_screen.dart
+│   │   ├── resume/
+│   │   │   ├── resume_analysis_screen.dart
+│   │   │   └── upload_resume_screen.dart
+│   │   ├── roadmap/
+│   │   │   ├── career_path_form_screen.dart
+│   │   │   └── roadmap_screen.dart
+│   │   └── splash/
+│   │       └── splash_screen.dart
 │   ├── services/
+│   │   ├── api_service.dart
+│   │   ├── auth_service.dart
+│   │   ├── firestore_service.dart
+│   │   ├── gemini_service.dart
+│   │   ├── mock_interview_service.dart
+│   │   ├── notification_service.dart
+│   │   ├── resume_extractor_service.dart
+│   │   ├── roadmap_service.dart
+│   │   ├── storage_service.dart
+│   │   └── voice_assistant_service.dart
 │   ├── theme/
+│   │   └── app_theme.dart
+│   ├── widgets/
+│   │   ├── custom_button.dart
+│   │   ├── custom_text_field.dart
+│   │   ├── feature_card.dart
+│   │   └── job_card.dart
+│   ├── firebase_options.dart
 │   └── main.dart
 ├── test/
+│   ├── career_goal_test.dart
+│   ├── gemini_diagnostic_test.dart
+│   ├── gemini_service_retry_test.dart
+│   ├── job_discovery_test.dart
+│   ├── mock_interview_test.dart
+│   ├── notification_test.dart
+│   ├── periodic_notification_test.dart
+│   ├── resume_analysis_test.dart
+│   ├── roadmap_test.dart
+│   ├── voice_assistant_test.dart
+│   └── widget_test.dart
+├── web/
+│   ├── icons/
+│   ├── index.html
+│   └── manifest.json
+├── .firebaserc
+├── .gitignore
+├── .metadata
+├── analysis_options.yaml
+├── firebase.json
+├── firestore.rules
+├── storage.rules
 ├── pubspec.yaml
 ├── pubspec.lock
 └── README.md
